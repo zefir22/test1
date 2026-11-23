@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Срез — запись на стрижку</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#151716;color:#f5f5ee;--lime:#d7fb71;--line:#3b4038}
+*{box-sizing:border-box}body{margin:0}header,main{width:min(1100px,calc(100% - 36px));margin:auto}header{display:flex;align-items:center;justify-content:space-between;padding:22px 0;border-bottom:1px solid var(--line)}
+.brand{font-size:25px;font-weight:900;letter-spacing:.14em;color:var(--lime)}nav{display:flex;gap:8px}button,input,select{font:inherit}button{cursor:pointer}nav button{border:1px solid var(--line);background:transparent;color:inherit;border-radius:8px;padding:9px 13px}nav button[aria-pressed=true]{border-color:var(--lime);color:var(--lime)}
+main{padding:clamp(28px,7vw,85px) 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(25px,6vw,80px);align-items:start}.kicker{color:var(--lime);font-weight:700;letter-spacing:.13em;text-transform:uppercase;font-size:.875rem}h1{font-size:clamp(2.8rem,7vw,5.8rem);letter-spacing:-.075em;line-height:.95;margin:18px 0 24px}p{line-height:1.55;color:#c1c6ba}.card{background:#222620;border:1px solid var(--line);border-radius:20px;padding:clamp(18px,4vw,34px)}h2{margin:0 0 20px;font-size:1.4rem}label{display:grid;gap:7px;margin-bottom:15px;font-size:.9rem}input,select{width:100%;min-width:0;padding:12px;border:1px solid #535a4e;border-radius:8px;background:#171a16;color:inherit}.dates{display:grid;grid-template-columns:1fr 1fr;gap:12px}.primary{background:var(--lime);color:#172007;border:none;border-radius:8px;padding:12px 18px;font-weight:750;width:100%}.primary:disabled{opacity:.55;cursor:default}.status{margin:12px 0 0}.status:empty{display:none}.error{color:#ffad9c}.table{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{text-align:left;padding:12px;border-bottom:1px solid var(--line)}[hidden]{display:none!important}@media(max-width:700px){.grid{grid-template-columns:1fr}h1{margin-bottom:14px}}
+</style>
+<header><span class="brand">СРЕЗ</span><nav aria-label="Разделы"><button id="clientTab" aria-pressed="true">Запись</button><button id="adminTab" aria-pressed="false">Журнал</button></nav></header>
+<main>
+<section id="client" class="grid">
+<div><div class="kicker">Барбершоп · тестовый сайт</div><h1>Запись<br>на стрижку</h1><p>30 минут · время Екатеринбурга</p></div>
+<form id="booking" class="card"><h2>Выберите удобное время</h2>
+<div class="dates"><label>Дата<input type="date" id="day" name="day" required></label><label>Время<select id="time" name="time" required disabled></select></label></div>
+<label>Ваше имя<input name="name" autocomplete="name" placeholder="Алексей" required maxlength="80"></label>
+<label>Телефон<input type="tel" name="phone" autocomplete="tel" placeholder="+7 900 123-45-67" required maxlength="25"></label>
+<button class="primary" id="submit" disabled>Записаться</button><p id="bookingStatus" class="status" role="status"></p></form>
+</section>
+<section id="admin" class="card" hidden><h2>Журнал записей</h2>
+<form id="login"><label>Пароль мастера<input id="password" type="password" required autocomplete="current-password"></label><button class="primary">Показать записи</button></form>
+<p id="adminStatus" class="status" role="status"></p><div class="table" id="table" hidden><table><thead><tr><th>Дата</th><th>Время</th><th>Клиент</th><th>Телефон</th></tr></thead><tbody id="rows"></tbody></table></div>
+</section>
+</main>
+<script>
+const byId = id => document.getElementById(id);
+const day = byId('day'), time = byId('time'), submit = byId('submit');
+const bookingStatus = byId('bookingStatus'), adminStatus = byId('adminStatus');
+const today = new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Yekaterinburg',dateStyle:'short'}).format(new Date());
+day.min = day.value = today;
+const displayDay = value => value.split('-').reverse().join('.');
+function message(el,text,error=false){el.textContent=text;el.classList.toggle('error',error);}
+async function api(path, options){
+  const response = await fetch(path,options);
+  const data = await response.json();
+  if(!response.ok) throw new Error(data.error);
+  return data;
+}
+let slotRequest = 0;
+async function loadSlots(){
+  const request = ++slotRequest;
+  submit.disabled = time.disabled = true;
+  time.replaceChildren(new Option('Загрузка…',''));
+  try {
+    const slots = day.value ? await api('/slots?day='+encodeURIComponent(day.value)) : [];
+    if(request !== slotRequest) return;
+    time.replaceChildren(new Option(slots.length ? 'Выберите' : 'Нет мест',''));
+    for(const slot of slots) time.add(new Option(slot,slot));
+    time.disabled = !slots.length;
+  } catch(error) {
+    if(request !== slotRequest) return;
+    time.replaceChildren(new Option('Недоступно',''));
+    message(bookingStatus,error.message,true);
+  }
+}
+day.onchange = () => {message(bookingStatus,'');loadSlots();};
+time.onchange = () => {submit.disabled = !time.value;};
+byId('booking').onsubmit = async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form));
+  for(const field of form.elements) field.disabled = true;
+  try {
+    const booked = await api('/book',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    message(bookingStatus,'Вы записаны на '+displayDay(booked.day)+' в '+booked.time+'.');
+    form.elements.name.value = form.elements.phone.value = '';
+  } catch(error){message(bookingStatus,error.message,true);}
+  finally {
+    day.disabled = form.elements.name.disabled = form.elements.phone.disabled = false;
+    await loadSlots();
+  }
+};
+function showAdmin(show){
+  byId('client').hidden = show;
+  byId('admin').hidden = !show;
+  byId('clientTab').setAttribute('aria-pressed',!show);
+  byId('adminTab').setAttribute('aria-pressed',show);
+}
+byId('clientTab').onclick = () => showAdmin(false);
+byId('adminTab').onclick = () => showAdmin(true);
+byId('login').onsubmit = async event => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button');
+  button.disabled = true;
+  byId('table').hidden = true;
+  byId('rows').replaceChildren();
+  message(adminStatus,'Загрузка…');
+  try {
+    const bookings = await api('/journal',{headers:{Authorization:'Bearer '+byId('password').value}});
+    for(const booking of bookings){
+      const row = byId('rows').insertRow();
+      for(const value of [displayDay(booking.day),booking.time,booking.name,booking.phone]) row.insertCell().textContent = value;
+    }
+    byId('table').hidden = !bookings.length;
+    message(adminStatus,bookings.length ? '' : 'Записей пока нет.');
+    button.textContent = 'Обновить записи';
+  } catch(error){message(adminStatus,error.message,true);}
+  finally {button.disabled = false;}
+};
+loadSlots();
+</script>
+</html>
